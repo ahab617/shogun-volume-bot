@@ -2,430 +2,636 @@ import { bot } from "../index";
 import { PublicKey } from "@solana/web3.js";
 import depositController from "../../controller/deposit";
 import walletController from "../../controller/wallet";
-// import withdrawController from "../../controller/withdraw";
-import tokenController from "../../controller/tokenSetting";
 import {
-	checkSolBalance,
-	checkSplTokenBalance,
+  checkSolBalance,
+  checkSplTokenBalance,
 } from "../../service/getBalance";
 import { withdrawService } from "../../service";
+import config from "../../config.json";
+import axios from "axios";
+import { removeAnswerCallback } from "./index";
 
+interface TwithdrawInfo {
+  userId: number;
+  withdrawAddress: string;
+  token: string;
+  amount: number;
+  privateKey: string;
+}
 let tokenAccount = [] as any;
 let userWalletAddress = "" as string;
 let balanceAmount = [] as any;
 let userBotWalletPrivateKey = "" as any;
-let withdrawInfo = {};
+let userBotWalletPublicKey = "" as any;
+let withdrawInfo: TwithdrawInfo | null;
+
 export const withdrawHandler = async (msg: any) => {
-	tokenAccount = [];
-	userWalletAddress = "";
-	balanceAmount = [];
-	userBotWalletPrivateKey = "";
-	withdrawInfo = {};
-	const user = await walletController.findOne({
-		filter: {
-			userId: msg.chat.id,
-		},
-	});
-	if (user) {
-		userBotWalletPrivateKey = user.privateKey;
-		const tokenInfo = await depositController.findOne({
-			filter: { userId: msg.chat.id },
-		});
-		if (tokenInfo) {
-			for (let i = 0; i < tokenInfo.tokenAddress.length; i++) {
-				if (
-					tokenInfo.tokenAddress[i] ===
-					"So11111111111111111111111111111111111111112"
-				) {
-					const balance = await checkSolBalance(user.publicKey);
-					await balanceAmount.push({
-						token: tokenInfo.tokenAddress[i],
-						balance: balance,
-					});
-					await tokenAccount.unshift([
-						{
-							text: `SOL  (${balance})`,
-							callback_data: `apply_${tokenInfo.tokenAddress[i]}`,
-						},
-					]);
-				} else {
-					const balance = await checkSplTokenBalance(
-						tokenInfo.tokenAddress[i],
-						user.publicKey
-					);
-					const token_info = await tokenController.findOne({
-						filter: { userId: msg.chat.id },
-					});
-					const r = token_info.pairInfo.filter(
-						(item: any) =>
-							item.inToken === tokenInfo.tokenAddress[i]
-					)[0];
-					await tokenAccount.push([
-						{
-							text: `${r.inSymbol}  (${balance})`,
-							callback_data: `apply_${tokenInfo.tokenAddress[i]}`,
-						},
-					]);
-					await balanceAmount.push({
-						token: tokenInfo.tokenAddress[i],
-						balance: balance,
-					});
-				}
-			}
-			await withdrawModal(msg);
-		} else {
-			bot.sendMessage(msg.chat.id, `Please deposit in the wallet.`, {
-				parse_mode: "HTML",
-				reply_markup: {
-					inline_keyboard: [
-						[{ text: "Return  👈", callback_data: "return" }],
-					],
-				},
-			});
-		}
-	} else {
-		bot.sendMessage(msg.chat.id, `Please connect the wallet.`, {
-			parse_mode: "HTML",
-			reply_markup: {
-				inline_keyboard: [
-					[{ text: "Return  👈", callback_data: "return" }],
-				],
-			},
-		});
-	}
+  try {
+    await removeAnswerCallback(msg.chat);
+    tokenAccount = [];
+    userWalletAddress = "";
+    balanceAmount = [];
+    userBotWalletPrivateKey = "";
+    userBotWalletPublicKey = "";
+    withdrawInfo = null;
+    const user = await walletController.findOne({
+      filter: {
+        userId: msg.chat.id,
+      },
+    });
+    if (user) {
+      userBotWalletPrivateKey = user.privateKey;
+      userBotWalletPublicKey = user.publicKey;
+      const tokenInfo = await depositController.findOne({
+        filter: { userId: msg.chat.id },
+      });
+      if (tokenInfo) {
+        for (let i = 0; i < tokenInfo.tokenAddress.length; i++) {
+          if (tokenInfo.tokenAddress[i] === config.solTokenAddress) {
+            const balance = (await checkSolBalance(user.publicKey)) as number;
+            if (balance > 0) {
+              await balanceAmount.push({
+                token: tokenInfo.tokenAddress[i],
+                balance: balance,
+              });
+              await tokenAccount.unshift([
+                {
+                  text: `SOL  (${balance})`,
+                  callback_data: `applyToken_${tokenInfo.tokenAddress[i]}`,
+                },
+              ]);
+            }
+          } else {
+            const balance = (await checkSplTokenBalance(
+              tokenInfo.tokenAddress[i],
+              user.publicKey
+            )) as number;
+            if (balance > 0) {
+              const response = await axios(
+                `${config.dexAPI}/${tokenInfo.tokenAddress[i]}`
+              );
+              if (response?.status == 200 && response?.data?.pairs) {
+                const data = response.data.pairs[0];
+                await tokenAccount.push([
+                  {
+                    text: `${data.baseToken.name}  (${balance})`,
+                    callback_data: `applyToken_${tokenInfo.tokenAddress[i]}`,
+                  },
+                ]);
+                await balanceAmount.push({
+                  token: tokenInfo.tokenAddress[i],
+                  balance: balance,
+                });
+              }
+            }
+          }
+        }
+        await withdrawModal(msg);
+      } else {
+        await bot.sendMessage(msg.chat.id, `Please deposit in the wallet.`, {
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "Return  👈", callback_data: "return" }],
+            ],
+          },
+        });
+      }
+    } else {
+      await bot.sendMessage(msg.chat.id, `Please connect the wallet.`, {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [[{ text: "Return  👈", callback_data: "return" }]],
+        },
+      });
+    }
+  } catch (error) {
+    console.log("withdrawHandlerError: ", error);
+  }
 };
 
 export const withdrawSelectHandler = async (msg: any, action: string | any) => {
-	const balance =
-		balanceAmount.filter(
-			(item: any) =>
-				item.token === "So11111111111111111111111111111111111111112"
-		)[0]?.balance || "0";
-	if (Number(balance) < 0.001) {
-		bot.sendMessage(
-			msg.chat.id,
-			`
-Native Token Insufficient.
-Please deposit the SOL in your wallet.`,
-			{
-				parse_mode: "HTML",
-				reply_markup: {
-					inline_keyboard: [
-						[{ text: "👈 Return", callback_data: "return" }],
-					],
-				},
-			}
-		);
-	} else {
-		bot.sendMessage(
-			msg.chat.id,
-			`
-<b>Input Withdraw address</b>`,
-			{
-				parse_mode: "HTML",
-				reply_markup: {
-					force_reply: true, // Force reply to get the address
-				},
-			}
-		).then((sentMessage) => {
-			// Set a reply listener for this specific message (from user)
-			bot.onReplyToMessage(
-				sentMessage.chat.id,
-				sentMessage.message_id,
-				async (reply) => {
-					const walletAddress = reply.text?.trim() as string;
-					if (
-						[
-							"/cancel",
-							"/support",
-							"/start",
-							"/wallet",
-							"/token",
-							"/deposit",
-							"/balance",
-							"/withdraw",
-							"/activity",
-							"/volume"
-						].includes(walletAddress)
-					) {
-						return;
-					}
-					const tokenAddress = action.split("_")[1];
-					// Whether walletAddress is a solana address or not.
-					const isValidAddress = await isValidSolanaAddress(
-						walletAddress
-					);
-					if (isValidAddress) {
-						userWalletAddress = walletAddress;
-						await amountInputForm(msg, tokenAddress);
-					} else {
-						await promptForWithAddress(msg, tokenAddress);
-					}
-				}
-			);
-		});
-	}
+  try {
+    if (
+      ![
+        "/cancel",
+        "/support",
+        "/start",
+        "/wallet",
+        "/token",
+        "/deposit",
+        "/withdraw",
+        "/balance",
+        "/activity",
+        "/volume",
+      ].includes(msg.text)
+    ) {
+      await bot.editMessageReplyMarkup(
+        { inline_keyboard: [] },
+        { chat_id: msg.chat.id, message_id: msg.message_id }
+      );
+    }
+    const solBalance =
+      (await balanceAmount.filter(
+        (item: any) => item.token === config.solTokenAddress
+      )[0]?.balance) || "0";
+    if (Number(solBalance) < config.networkFee) {
+      await bot.sendMessage(
+        msg.chat.id,
+        `
+  Native Token Insufficient.
+  Please deposit the SOL in your wallet.`,
+        {
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [[{ text: "👈 Return", callback_data: "return" }]],
+          },
+        }
+      );
+    } else {
+      await bot
+        .sendMessage(
+          msg.chat.id,
+          `
+  <b>Input Withdraw address</b>`,
+          {
+            parse_mode: "HTML",
+            reply_markup: {
+              force_reply: true,
+            },
+          }
+        )
+        .then(async (sentMessage) => {
+          await bot.onReplyToMessage(
+            sentMessage.chat.id,
+            sentMessage.message_id,
+            async (reply) => {
+              const walletAddress = reply.text?.trim() as string;
+              if (
+                [
+                  "/cancel",
+                  "/support",
+                  "/start",
+                  "/wallet",
+                  "/token",
+                  "/deposit",
+                  "/balance",
+                  "/withdraw",
+                  "/activity",
+                  "/volume",
+                ].includes(walletAddress)
+              ) {
+                return;
+              }
+              const tokenAddress = action.split("_")[1];
+              const balance =
+                (await balanceAmount.filter(
+                  (item: any) => item.token === tokenAddress
+                )[0]?.balance) || "0";
+              const isValidAddress = await isValidSolanaAddress(walletAddress);
+              if (isValidAddress) {
+                userWalletAddress = walletAddress;
+                await selectInputForm(msg, tokenAddress, balance);
+              } else {
+                await promptForWithAddress(msg, tokenAddress, balance);
+              }
+            }
+          );
+        });
+    }
+  } catch (error) {
+    console.log("withdrawSelectHandlerError: ", error);
+  }
 };
 
 export const applyWithdrawHandler = async (msg: any) => {
-	bot.editMessageReplyMarkup(
-		{ inline_keyboard: [] },
-		{ chat_id: msg.chat.id, message_id: msg.message_id }
-	);
-	await withdrawService(withdrawInfo);
+  try {
+    if (
+      ![
+        "/cancel",
+        "/support",
+        "/start",
+        "/wallet",
+        "/token",
+        "/deposit",
+        "/withdraw",
+        "/balance",
+        "/activity",
+        "/volume",
+      ].includes(msg.text)
+    ) {
+      await bot.editMessageReplyMarkup(
+        { inline_keyboard: [] },
+        { chat_id: msg.chat.id, message_id: msg.message_id }
+      );
+    }
+    await withdrawService(withdrawInfo);
+  } catch (error) {
+    console.log("applyWithdrawHandlerError: ", error);
+  }
 };
 const withdrawModal = async (msg: any) => {
-	tokenAccount.push([{ text: "Return  👈", callback_data: "return" }]);
-	bot.sendMessage(
-		msg.chat.id,
-		`
-Select Withdraw Token
-`,
-		{
-			parse_mode: "HTML",
-			reply_markup: {
-				inline_keyboard: tokenAccount,
-			},
-		}
-	);
+  try {
+    await tokenAccount.push([{ text: "Return  👈", callback_data: "return" }]);
+    await bot.sendMessage(
+      msg.chat.id,
+      `
+  Select Withdraw Token
+  `,
+      {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: tokenAccount,
+        },
+      }
+    );
+  } catch (error) {
+    console.log("withdrawModal: ", error);
+  }
 };
 
-const promptForWithAddress = (msg: any, tokenAddress: string) => {
-	bot.sendMessage(
-		msg.chat.id,
-		`
+const promptForWithAddress = async (
+  msg: any,
+  tokenAddress: string,
+  balance: number
+) => {
+  try {
+    await bot
+      .sendMessage(
+        msg.chat.id,
+        `
 <b>Input the valid withdraw address</b>
 `,
-		{
-			parse_mode: "HTML",
-			reply_markup: {
-				force_reply: true, // Force reply to get the address
-			},
-		}
-	).then((sentMessage) => {
-		// Set a reply listener for this specific message (from user)
-		bot.onReplyToMessage(
-			sentMessage.chat.id,
-			sentMessage.message_id,
-			async (reply) => {
-				const withdrawAddress = reply.text?.trim() as string;
-				if (
-					[
-						"/cancel",
-						"/support",
-						"/start",
-						"/wallet",
-						"/token",
-						"/deposit",
-						"/withdraw",
-						"/balance",
-						"/activity",
-						"/volume"
-					].includes(withdrawAddress)
-				) {
-					return;
-				}
-				// Whether walletAddress is a solana address or not.
-				const isValidAddress = await isValidSolanaAddress(
-					withdrawAddress
-				);
-				if (isValidAddress) {
-					await amountInputForm(msg, tokenAddress);
-				} else {
-					return promptForWithAddress(msg, tokenAddress);
-				}
-			}
-		);
-	});
+        {
+          parse_mode: "HTML",
+          reply_markup: {
+            force_reply: true,
+          },
+        }
+      )
+      .then(async (sentMessage) => {
+        await bot.onReplyToMessage(
+          sentMessage.chat.id,
+          sentMessage.message_id,
+          async (reply) => {
+            const withdrawAddress = reply.text?.trim() as string;
+            if (
+              [
+                "/cancel",
+                "/support",
+                "/start",
+                "/wallet",
+                "/token",
+                "/deposit",
+                "/withdraw",
+                "/balance",
+                "/activity",
+                "/volume",
+              ].includes(withdrawAddress)
+            ) {
+              return;
+            }
+            const isValidAddress = await isValidSolanaAddress(withdrawAddress);
+            if (isValidAddress) {
+              await selectInputForm(msg, tokenAddress, balance);
+            } else {
+              return promptForWithAddress(msg, tokenAddress, balance);
+            }
+          }
+        );
+      });
+  } catch (error) {
+    console.log("promptForWithAddressError: ", error);
+  }
 };
 
-const isValidSolanaAddress = (address: string) => {
-	try {
-		const pubKey = new PublicKey(address);
-		return PublicKey.isOnCurve(pubKey.toBytes());
-	} catch (error) {
-		return false;
-	}
+const isValidSolanaAddress = async (address: string) => {
+  try {
+    const pubKey = new PublicKey(address);
+    return PublicKey.isOnCurve(pubKey.toBytes());
+  } catch (error) {
+    return false;
+  }
 };
 
-const amountInputForm = (msg: any, tokenAddress: string) => {
-	bot.sendMessage(
-		msg.chat.id,
-		`
-<b>Input Withdraw amount</b>
-<b>Gas Fee: </b>  0.001 SOL
-`,
-		{
-			parse_mode: "HTML",
-			reply_markup: {
-				force_reply: true, // Force reply to get the address
-			},
-		}
-	).then((sentMessage) => {
-		// Set a reply listener for this specific message (from user)
-		bot.onReplyToMessage(
-			sentMessage.chat.id,
-			sentMessage.message_id,
-			async (reply) => {
-				const withdrawAmount = reply.text?.trim() as string;
-				if (
-					[
-						"/cancel",
-						"/support",
-						"/start",
-						"/wallet",
-						"/token",
-						"/deposit",
-						"/withdraw",
-						"/balance",
-						"/activity",
-						"/volume"
-					].includes(withdrawAmount)
-				) {
-					return;
-				}
-				// Whether walletAddress is a solana address or not.
-				const isValidBalance = await isValidAmount(
-					withdrawAmount,
-					tokenAddress
-				);
-				if (isValidBalance) {
-					withdrawInfo = {
-						userId: sentMessage.chat.id,
-						withdrawAddress: userWalletAddress,
-						token: tokenAddress,
-						amount: withdrawAmount,
-						privateKey: userBotWalletPrivateKey,
-					};
-					bot.sendMessage(
-						msg.chat.id,
-						`
-<b>To: </b> <code>${userWalletAddress}</code>
-<b>From: </b> <code>${userBotWalletPrivateKey}</code>
-<b>Token Address: </b>  ${tokenAddress}
-<b>Amount: </b>  ${withdrawAmount}`,
-						{
-							parse_mode: "HTML",
-							reply_markup: {
-								inline_keyboard: [
-									[
-										{
-											text: "👈 Return",
-											callback_data: "return",
-										},
-										{
-											text: "✔️ Apply",
-											callback_data: "withdraw_apply",
-										},
-									],
-								],
-							},
-						}
-					);
-				} else {
-					await promptForWithdraw(msg, tokenAddress);
-				}
-			}
-		);
-	});
+const selectInputForm = async (
+  msg: any,
+  tokenAddress: string,
+  balance: number
+) => {
+  try {
+    await bot.sendMessage(
+      msg.chat.id,
+      `
+  <b>Current Balance: </b> ${balance}
+  <b>Network Fee: </b> ${config.networkFee} SOL
+  `,
+      {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: "All",
+                callback_data: `amountAll_${tokenAddress}`,
+              },
+              {
+                text: "Some",
+                callback_data: `amountSome_${tokenAddress}`,
+              },
+            ],
+          ],
+        },
+      }
+    );
+  } catch (error) {
+    console.log("selectInputFormError: ", error);
+  }
 };
 
-const isValidAmount = (amount: string, tokenAddress: string) => {
-	const balance = balanceAmount.filter(
-		(item: any) => item.token === tokenAddress
-	)[0]?.balance;
-	if (tokenAddress === "So11111111111111111111111111111111111111112") {
-		if (Number(amount) + 0.001 <= balance) {
-			return true;
-		} else {
-			false;
-		}
-	} else {
-		if (Number(amount) <= balance) {
-			return true;
-		} else {
-			return false;
-		}
-	}
+export const allWithdrawHandler = async (msg: any, action: string) => {
+  try {
+    const tokenAddress = action.split("_")[1];
+    const balance =
+      (await balanceAmount.filter((item: any) => item.token === tokenAddress)[0]
+        ?.balance) || "0";
+    if (
+      ![
+        "/cancel",
+        "/support",
+        "/start",
+        "/wallet",
+        "/token",
+        "/deposit",
+        "/withdraw",
+        "/balance",
+        "/activity",
+        "/volume",
+      ].includes(msg.text)
+    ) {
+      await bot.editMessageReplyMarkup(
+        { inline_keyboard: [] },
+        { chat_id: msg.chat.id, message_id: msg.message_id }
+      );
+    }
+    if (tokenAddress === config.solTokenAddress) {
+      withdrawInfo = {
+        userId: msg.chat.id,
+        withdrawAddress: userWalletAddress,
+        token: tokenAddress,
+        amount: balance - config.networkFee,
+        privateKey: userBotWalletPrivateKey,
+      } as TwithdrawInfo;
+    } else {
+      withdrawInfo = {
+        userId: msg.chat.id,
+        withdrawAddress: userWalletAddress,
+        token: tokenAddress,
+        amount: balance,
+        privateKey: userBotWalletPrivateKey,
+      } as TwithdrawInfo;
+    }
+    await bot.sendMessage(
+      msg.chat.id,
+      `
+  <b>To: </b> <code>${userWalletAddress}</code>
+  <b>From: </b> <code>${userBotWalletPublicKey}</code>
+  <b>Token Address: </b>  ${tokenAddress}
+  <b>Amount: </b>  ${withdrawInfo?.amount}`,
+      {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: "👈 Return",
+                callback_data: "return",
+              },
+              {
+                text: "✔️ Apply",
+                callback_data: "withdraw_apply",
+              },
+            ],
+          ],
+        },
+      }
+    );
+  } catch (error) {
+    console.log("allWithdrawHandlerError: ", error);
+  }
 };
 
-const promptForWithdraw = (msg: any, tokenAddress: string) => {
-	bot.sendMessage(
-		msg.chat.id,
-		`
+export const someWithdrawHandler = async (msg: any, action: string) => {
+  try {
+    const tokenAddress = action.split("_")[1];
+    const balance =
+      (await balanceAmount.filter((item: any) => item.token === tokenAddress)[0]
+        ?.balance) || "0";
+    if (
+      ![
+        "/cancel",
+        "/support",
+        "/start",
+        "/wallet",
+        "/token",
+        "/deposit",
+        "/withdraw",
+        "/balance",
+        "/activity",
+        "/volume",
+      ].includes(msg.text)
+    ) {
+      await bot.editMessageReplyMarkup(
+        { inline_keyboard: [] },
+        { chat_id: msg.chat.id, message_id: msg.message_id }
+      );
+    }
+    await bot
+      .sendMessage(
+        msg.chat.id,
+        `
+  <b>Input Withdraw amount</b>
+  <b>Current Balance: </b> ${balance}
+  `,
+        {
+          parse_mode: "HTML",
+          reply_markup: {
+            force_reply: true,
+          },
+        }
+      )
+      .then(async (sentMessage) => {
+        await bot.onReplyToMessage(
+          sentMessage.chat.id,
+          sentMessage.message_id,
+          async (reply) => {
+            const withdrawAmount = reply.text?.trim() as string;
+            if (
+              [
+                "/cancel",
+                "/support",
+                "/start",
+                "/wallet",
+                "/token",
+                "/deposit",
+                "/withdraw",
+                "/balance",
+                "/activity",
+                "/volume",
+              ].includes(withdrawAmount)
+            ) {
+              return;
+            }
+            const isValidBalance = await isValidAmount(
+              withdrawAmount,
+              tokenAddress
+            );
+            if (isValidBalance) {
+              withdrawInfo = {
+                userId: sentMessage.chat.id,
+                withdrawAddress: userWalletAddress,
+                token: tokenAddress,
+                amount: Number(withdrawAmount),
+                privateKey: userBotWalletPrivateKey,
+              };
+              await bot.sendMessage(
+                msg.chat.id,
+                `
+  <b>To: </b> <code>${userWalletAddress}</code>
+  <b>From: </b> <code>${userBotWalletPublicKey}</code>
+  <b>Token Address: </b>  ${tokenAddress}
+  <b>Amount: </b>  ${withdrawAmount}`,
+                {
+                  parse_mode: "HTML",
+                  reply_markup: {
+                    inline_keyboard: [
+                      [
+                        {
+                          text: "👈 Return",
+                          callback_data: "return",
+                        },
+                        {
+                          text: "✔️ Apply",
+                          callback_data: "withdraw_apply",
+                        },
+                      ],
+                    ],
+                  },
+                }
+              );
+            } else {
+              await promptForWithdraw(msg, tokenAddress, balance);
+            }
+          }
+        );
+      });
+  } catch (error) {
+    console.log("someWithdrawHandler: ", error);
+  }
+};
+
+const isValidAmount = async (amount: string, tokenAddress: string) => {
+  try {
+    const balance = await balanceAmount.filter(
+      (item: any) => item.token === tokenAddress
+    )[0]?.balance;
+    if (Number(amount) <= balance) {
+      return true;
+    } else {
+      return false;
+    }
+  } catch (error) {
+    console.log("isValidAmountError: ", error);
+  }
+};
+
+const promptForWithdraw = async (
+  msg: any,
+  tokenAddress: string,
+  balance: number
+) => {
+  try {
+    await bot
+      .sendMessage(
+        msg.chat.id,
+        `
 <b>Input valid Withdraw amount</b>
-<b>Gas Fee: </b> 0.001 SOL
+<b>Current Balance: </b> ${balance}
 `,
-		{
-			parse_mode: "HTML",
-			reply_markup: {
-				force_reply: true,
-			},
-		}
-	).then((sentMessage) => {
-		bot.onReplyToMessage(
-			sentMessage.chat.id,
-			sentMessage.message_id,
-			async (reply) => {
-				const withdrawAmount = reply.text?.trim() as string;
-				if (
-					[
-						"/cancel",
-						"/support",
-						"/start",
-						"/wallet",
-						"/token",
-						"/deposit",
-						"/balance",
-						"/withdraw",
-						"/volume",
-						"/activity"
-					].includes(withdrawAmount)
-				) {
-					return;
-				}
-				// Whether walletAddress is a solana address or not.
-				const isValidBalance = await isValidAmount(
-					withdrawAmount,
-					tokenAddress
-				);
-				if (isValidBalance) {
-					withdrawInfo = {
-						userId: msg.chat.id,
-						withdrawAddress: userWalletAddress,
-						token: tokenAddress,
-						amount: withdrawAmount,
-						privateKey: userBotWalletPrivateKey,
-					};
-					bot.sendMessage(
-						msg.chat.id,
-						`
+        {
+          parse_mode: "HTML",
+          reply_markup: {
+            force_reply: true,
+          },
+        }
+      )
+      .then(async (sentMessage) => {
+        await bot.onReplyToMessage(
+          sentMessage.chat.id,
+          sentMessage.message_id,
+          async (reply) => {
+            const withdrawAmount = reply.text?.trim() as string;
+            if (
+              [
+                "/cancel",
+                "/support",
+                "/start",
+                "/wallet",
+                "/token",
+                "/deposit",
+                "/balance",
+                "/withdraw",
+                "/volume",
+                "/activity",
+              ].includes(withdrawAmount)
+            ) {
+              return;
+            }
+            // Whether walletAddress is a solana address or not.
+            const isValidBalance = await isValidAmount(
+              withdrawAmount,
+              tokenAddress
+            );
+            if (isValidBalance) {
+              withdrawInfo = {
+                userId: msg.chat.id,
+                withdrawAddress: userWalletAddress,
+                token: tokenAddress,
+                amount: Number(withdrawAmount),
+                privateKey: userBotWalletPrivateKey,
+              };
+              await bot.sendMessage(
+                msg.chat.id,
+                `
 <b>To: </b> <code>${userWalletAddress}</code>
-<b>From: </b> <code>${userBotWalletPrivateKey}</code>
+<b>From: </b> <code>${userBotWalletPublicKey}</code>
 <b>Token Address: </b>  ${tokenAddress}
 <b>Amount: </b>  ${withdrawAmount}`,
-						{
-							parse_mode: "HTML",
-							reply_markup: {
-								inline_keyboard: [
-									[
-										{
-											text: "👈 Return",
-											callback_data: "return",
-										},
-										{
-											text: "✔️ Apply",
-											callback_data: "withdraw_apply",
-										},
-									],
-								],
-							},
-						}
-					);
-				} else {
-					return promptForWithdraw(msg, tokenAddress);
-				}
-			}
-		);
-	});
+                {
+                  parse_mode: "HTML",
+                  reply_markup: {
+                    inline_keyboard: [
+                      [
+                        {
+                          text: "👈 Return",
+                          callback_data: "return",
+                        },
+                        {
+                          text: "✔️ Apply",
+                          callback_data: "withdraw_apply",
+                        },
+                      ],
+                    ],
+                  },
+                }
+              );
+            } else {
+              return promptForWithdraw(msg, tokenAddress, balance);
+            }
+          }
+        );
+      });
+  } catch (error) {
+    console.log("promptForWithdrawError: ", error);
+  }
 };

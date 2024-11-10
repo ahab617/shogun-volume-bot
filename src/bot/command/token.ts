@@ -1,16 +1,19 @@
-
-const { bot, Commands } = require("../index.ts")
-import { tokenSettingHandler } from "../library/tokenSettingHandler"
-const { removeAnswerCallback, sendMessage } = require('../library/index');
+import { tokenSettingHandler } from "../library/tokenSettingHandler";
+import { bot } from "../index";
+const { Commands } = require("../index.ts");
 
 export default new Commands(
-    new RegExp(/^\/token/),
-    "TokenSetting Bot",
-    "token",
-    true,
-    async (msg: any) => {
-        removeAnswerCallback(msg.chat)
-        tokenSettingHandler(msg);
-
+  new RegExp(/^\/token/),
+  "TokenSetting Bot",
+  "token",
+  true,
+  async (msg: any) => {
+    const fromId = msg.from.id;
+    const chatId = msg.chat.id;
+    if (fromId != chatId) {
+      await bot.sendMessage(msg.chat.id, `No permission`, {});
+      return;
     }
-)
+    await tokenSettingHandler(msg);
+  }
+);

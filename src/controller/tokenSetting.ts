@@ -1,48 +1,39 @@
-
-const { Tokens } = require('../db/model');
+const { Tokens } = require("../db/model");
 const { Swap } = require("../db/model");
-const { Deposit } = require('../db/model');
-const depositController = require('./deposit')
 
 const findOne = async (props: any) => {
-	const { filter } = props;
-	const result = await Tokens.findOne(filter);
-	return result;
-} 
+  try {
+    const { filter } = props;
+    const result = await Tokens.findOne(filter);
+    return result;
+  } catch (error) {
+    throw new Error("Failed to find tokenSettingInfo");
+  }
+};
 
 const create = async (tokenInfo: any) => {
-    try {
-        // const depositToken = {
-        //     userId: tokenInfo.userId,
-        //     tokenAddress: tokenInfo.publicKey
-        // }
-        // const r = await depositController.create(depositToken);
-        // if(r.status == 200) {
-            const newToken = new Tokens(
-                tokenInfo
-            );
-            const newTokenSave = await newToken.save();
-    
-            return newTokenSave;
-        // } else {
-        //     return null;
-        // }
-    } catch (error) {
-        return null;
-    }
-}
+  try {
+    const newToken = new Tokens(tokenInfo);
+    const newTokenSave = await newToken.save();
+    return newTokenSave;
+  } catch (error) {
+    throw new Error("Failed to create tokenSettingInfo");
+  }
+};
 
 const deleteOne = async (props: any) => {
-	const { filter } = props;
-    await Swap.deleteOne(filter)
-    const result = await Tokens.deleteOne(
-		filter
-	);
-	return result;
-}
+  try {
+    const { filter } = props;
+    await Swap.deleteOne(filter);
+    const result = await Tokens.deleteOne(filter);
+    return result;
+  } catch (error) {
+    throw new Error("Failed to delete tokenSettingInfo");
+  }
+};
 
 export default {
-    findOne,
-	create,
-	deleteOne
-}
+  findOne,
+  create,
+  deleteOne,
+};
