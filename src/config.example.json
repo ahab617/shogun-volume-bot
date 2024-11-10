@@ -1,0 +1,18 @@
+{
+  "TOKEN": "",
+  "database": "",
+  "salt": "",
+  "rpcUrl": "https://api.mainnet-beta.solana.com",
+  "dexAPI": "https://api.dexscreener.io/latest/dex/tokens",
+  "solScanUrl": "https://solscan.io/tx",
+  "websiteUrl": "https://shoguncrypto.com/",
+  "twitterUrl": "",
+  "telegramUrl": "",
+  "supportUrl": "",
+  "adminWalletAddress": "",
+  "SUPER_ADMIN_ID": 123456789,
+  "solTokenAddress": "So11111111111111111111111111111111111111112",
+  "splTokenAddress": "",
+  "networkFee": 0.005,
+  "minimumAmount": 0.01
+}
