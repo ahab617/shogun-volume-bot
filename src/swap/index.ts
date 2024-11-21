@@ -62,8 +62,8 @@ const executeSwap = async (userList: any, currentVolume: number) => {
       if (baseToken === config.solTokenAddress) {
         const currentSolBalance = (await checkSolBalance(
           swapDetails[0].publicKey
-        )) as number;
-
+        )) as any;
+        if (currentSolBalance === undefined) return;
         if (currentSolBalance >= amount + config.networkFee) {
           isBalance = true;
           const result = await apiSwap(
@@ -107,8 +107,8 @@ Swap for ${Number(amount)} ${baseSymbol} -> ${quoteSymbol}
         const currentTokenBalance = (await checkSplTokenBalance(
           baseToken,
           swapDetails[0].publicKey
-        )) as number;
-
+        )) as any;
+        if (currentTokenBalance === undefined) return;
         if (currentTokenBalance >= amount) {
           isBalance = true;
           const result = await apiSwap(
@@ -153,14 +153,14 @@ Reserve Swap for ${Number(amount)} ${baseSymbol} -> ${quoteSymbol}
       const currentTokenBalance = (await checkSplTokenBalance(
         quoteToken,
         swapDetails[0].publicKey
-      )) as number;
-
+      )) as any;
+      if (currentTokenBalance === undefined) return;
       const amount1 = (await convertTokenAmount(
         amount,
         baseToken,
         quoteToken
-      )) as number;
-
+      )) as any;
+      if (amount1 === undefined) return;
       if (amount1 > currentTokenBalance || currentTokenBalance == 0) {
         if (isBalance) {
           const realAmount = Math.floor(amount1);
@@ -235,16 +235,19 @@ You have not the native token enough.
         }
       );
 
-      bot.on("callback_query", async function onCallbackQuery(callbackQuery) {
-        const action = callbackQuery.data;
-        if (action?.startsWith("deposit_Sol")) {
-          await depositSolHandler(
-            callbackQuery.message,
-            config.networkFee,
-            swapDetails[0].publicKey
-          );
+      bot.on(
+        "callback_query",
+        async function onCallbackQuery(callbackQuery: any) {
+          const action = callbackQuery.data;
+          if (action?.startsWith("deposit_Sol")) {
+            await depositSolHandler(
+              callbackQuery.message,
+              config.networkFee,
+              swapDetails[0].publicKey
+            );
+          }
         }
-      });
+      );
       return;
     }
     let currentVolume = 0;
